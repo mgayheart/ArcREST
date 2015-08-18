@@ -1,7 +1,7 @@
 from ..security.security import OAuthSecurityHandler, AGOLTokenSecurityHandler, PortalTokenSecurityHandler
 from .._abstract.abstract import BaseAGOLClass
 from _parameters import ItemParameter, BaseParameters, AnalyzeParameters, PublishCSVParameters
-from _community import Group
+from _community import Group as CommunityGroup
 import urllib
 import urlparse
 import json
@@ -143,11 +143,14 @@ class Users(BaseAGOLClass):
         return self._json
     #----------------------------------------------------------------------
     def __iter__(self):
+        #TODO Implement Iterator for users
+
         """returns properties (key/values) from the JSON response"""
-        if self._json_dict is None:
-            self.__init()
-        for k,v in self._json_dict.iteritems():
-            yield [k,v]
+        yield None
+        #if self._json_dict is None:
+            #self.__init()
+        #for k,v in self._json_dict.iteritems():
+            #yield [k,v]
     #----------------------------------------------------------------------
     def __getUsername(self):
         """tries to parse the user name from various objects"""
@@ -238,6 +241,7 @@ class Item(BaseAGOLClass):
     _accessInformation = None
     _orgId = None
     _itemControl = None
+    _sourceUrl = None
     #----------------------------------------------------------------------
     def __init__(self,url,
                  securityHandler,
@@ -454,8 +458,8 @@ def %s(self):
             onlineFileName, file_ext = splitext(self._thumbnail)
             fileNameSafe = "".join(x for x in fileName if x.isalnum()) + file_ext
             result = self._download_file(imgUrl,
-                                         save_path=filePath, 
-                                         file_name=fileNameSafe, 
+                                         save_path=filePath,
+                                         file_name=fileNameSafe,
                                          param_dict=param_dict,
                                          securityHandler=self._securityHandler,
                                          proxy_url=None,
@@ -798,6 +802,12 @@ def %s(self):
                              securityHandler=self._securityHandler,
                              proxy_port=self._proxy_port,
                              proxy_url=self._proxy_url)
+    @property
+    def sourceUrl(self):
+        '''gets the property value for sourceUrl'''
+        if self._sourceUrl is None:
+            self.__init()
+        return self._sourceUrl
     #----------------------------------------------------------------------
     def shareItem(self,
                   groups="",
@@ -954,17 +964,17 @@ def %s(self):
         Output:
          dictionary
         """
-        url = self._baseUrl.replace("/items", "/users")
-        uc = UserContent(url=url,
-                         username=self.owner,
-                         securityHandler=self._securityHandler,
-                         proxy_url=self._proxy_url,
-                         proxy_port=self._proxy_port)
+        #url = self.root.replace("/items", "/users")
+        #uc = Item(url=url,
+                         #username=self.owner,
+                         #securityHandler=self._securityHandler,
+                         #proxy_url=self._proxy_url,
+                         #proxy_port=self._proxy_port)
+        #Need to verify TODO
         ip = ItemParameter()
         ip.metadata = metadataFile
-        res = uc.updateItem(itemId=self.itemId,
-                            updateItemParameters=ip)
-        del uc
+        res = self.userItem.updateItem(itemParameters=ip)
+
         del ip
         return res
 ########################################################################
@@ -2125,7 +2135,7 @@ class User(BaseAGOLClass):
             "f" : "json",
             'fileType': fileType
         }
-        
+
         if isinstance(buildIntialCache, bool):
             params['buildInitialCache'] = buildIntialCache
         if publishParameters is not None and \
@@ -2133,7 +2143,7 @@ class User(BaseAGOLClass):
             params['publishParameters'] = json.dumps(publishParameters.value)
         elif isinstance(publishParameters, PublishCSVParameters):
             params['publishParameters'] = json.dumps(publishParameters.value)
-        
+
         if itemId is not None:
             params['itemId'] = itemId
         if text is not None and fileType.lower() == 'csv':
@@ -2176,24 +2186,24 @@ class User(BaseAGOLClass):
                         status = "partial"
                         while status != "completed":
                             status = ui.status(jobId=res['services'][0]['jobId'], jobType="publish")
-                            
+
                             if status['status'] == 'failed':
                                 if 'statusMessage' in status:
-                                    print status['statusMessage']                                 
+                                    print status['statusMessage']
                                 raise Exception("Could not publish item: %s" % itemId)
-                                
+
                             elif status['status'].lower() == "completed":
                                 break
                             time.sleep(2)
                     return ui
             else:
                 print res
-                raise Exception("Could not publish item: %s" % itemId)            
+                raise Exception("Could not publish item: %s" % itemId)
         else:
             print res
-            raise Exception("Could not publish item: %s" % itemId)        
+            raise Exception("Could not publish item: %s" % itemId)
         return None
-        
+
     #----------------------------------------------------------------------
     def exportItem(self,
                    title,
@@ -2279,13 +2289,20 @@ class User(BaseAGOLClass):
             params['snippet'] = snippet
         if description is not None:
             params['description'] = description
-        return self._do_post(url=url,
+        res =  self._do_post(url=url,
                              param_dict=params,
                              securityHandler=self._securityHandler,
                              proxy_port=self._proxy_port,
                              proxy_url=self._proxy_url)
+        if 'id' in res:
+            url = "%s/%s" % (self.location, res['id'])
+            return UserItem(url=url,
+                            securityHandler=self._securityHandler,
+                            proxy_url=self._proxy_url,
+                            proxy_port=self._proxy_port)
+        return res
     #----------------------------------------------------------------------
-    def deleteFolder(self, folderId):
+    def deleteFolder(self):
         """
         The delete user folder operation (POST only) is available only on
         the user's non-root folders. The user's root folder cannot be
@@ -2293,12 +2310,10 @@ class User(BaseAGOLClass):
         Deleting a folder also deletes all items that it contains (both the
         items and the links are removed).
 
-        Inputs:
-           folderId - id of folder to remove
+
         """
         if self.currentFolder is not None and \
-           (self.currentFolder != "/" or \
-            self.currentFolder != ""):
+           self.currentFolder['id'] != None:
             url = "%s/delete" % self.location
             params = {
                 "f" : "json"
@@ -2805,7 +2820,7 @@ class Group(BaseAGOLClass):
             self.__init()
         for k,v in self._json_dict.iteritems():
             yield [k,v]
-        #Should this actually iterate over Items, not the return, which is 
+        #Should this actually iterate over Items, not the return, which is
         #always ['items', [{'extent': [[-1.....
     #----------------------------------------------------------------------
     def refresh(self):
@@ -2834,7 +2849,7 @@ class Group(BaseAGOLClass):
     @property
     def group(self):
         """returns the community.Group class for the current group"""
-        gURL = self.__assemblyurl(self._contentURL, self._groupId)
+        gURL = self.__assembleURL(self._contentURL, self._groupId)
 
         return Group(url=gURL,
                      securityHandler=self._securityHandler,

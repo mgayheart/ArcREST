@@ -206,7 +206,7 @@ class Community(BaseAGOLClass):
         files = []
         url = self._url + "/createGroup"
         parsed = urlparse.urlparse(url)
-
+        groups = self.groups
         if thumbnail is not None and \
            os.path.isfile(thumbnail):
             files.append(('thumbnail', thumbnail, os.path.basename(thumbnail)))
@@ -219,12 +219,25 @@ class Community(BaseAGOLClass):
                                        ssl=parsed.scheme.lower() == 'https',
                                        proxy_url=self._proxy_url,
                                        proxy_port=self._proxy_port)
-            return res
+
         else:
-            return self._do_post(url=url, param_dict=params,
+            res = self._do_post(url=url, param_dict=params,
                                  securityHandler=self._securityHandler,
                                  proxy_url=self._proxy_url,
                                  proxy_port=self._proxy_port)
+
+        if "group" not in res:
+            raise Exception("%s" % res)
+        if "id" not in res['group']:
+            raise Exception("%s" % res)
+        groupId = res['group']['id']
+        url = "%s/groups/%s" % (self.root, groupId)
+        return Group(url=url,
+                     securityHandler=self._securityHandler,
+                     proxy_url=self._proxy_url,
+                     proxy_port=self._proxy_port,
+                     initalize=False)
+
     #----------------------------------------------------------------------
     @property
     def root(self):
@@ -279,7 +292,7 @@ class Groups(BaseAGOLClass):
     _proxy_port = None
     _proxy_url = None
     _json = None
-    _json_dict = None    
+    _json_dict = None
     #----------------------------------------------------------------------
     def __init__(self,
                  url,
@@ -295,46 +308,25 @@ class Groups(BaseAGOLClass):
         self._proxy_port = proxy_port
         self._proxy_url = proxy_url
         if initalize:
-            self.__init() 
-            
+            self.__init()
+
     _currentUser = None
     _portalId = None
     #----------------------------------------------------------------------
     def __init(self):
         """loads the property data into the class"""
-       
+
         if self._portalId is None:
-                
+
             from administration import Administration
             portalSelf = Administration(url=self._securityHandler.org_url,
                                   securityHandler=self._securityHandler,
                                   proxy_url=self._proxy_url,
-                                  proxy_port=self._proxy_port).portals.portalSelf       
-          
-            self._portalId = portalSelf.id 
+                                  proxy_port=self._proxy_port).portals.portalSelf
+
+            self._portalId = portalSelf.id
             self._currentUser = portalSelf.user['username']
-            
-        q = " orgid: %s" % self._portalId
-        q = q + " owner: %s" % self._currentUser
-        
-        #Mike - Not sure what is the correct way to hydrate this object. 
-        json_dict = self.search(q=q, start=1, num=10, sortField="title", 
-                               sortOrder="asc")
-        if 'total' in json_dict and 'results' in json_dict:
-            if json_dict['total'] > 0:
-                self._json_dict = json_dict['results']
-                self._json = json.dumps(json_dict['results'])
-        #attributes = [attr for attr in dir(self)
-                      #if not attr.startswith('__') and \
-                      #not attr.startswith('_')]
-        #for k,v in json_dict.iteritems():
-            #if k in attributes:
-                #setattr(self, "_"+ k, json_dict[k])
-            #else:
-                #print k, " - attribute not implemented in Content.Groups class."
-    
     #----------------------------------------------------------------------
-    
     @property
     def root(self):
         """returns the url for the class"""
@@ -344,14 +336,20 @@ class Groups(BaseAGOLClass):
         """returns raw JSON response as string"""
         if self._json is None:
             self.__init()
-        return self._json
+        return ""
     #----------------------------------------------------------------------
     def __iter__(self):
-        """returns properties (key/values) from the JSON response"""
-        if self._json_dict is None:
-            self.__init()
-        for k,v in self._json_dict.iteritems():
-            yield [k,v]
+        """returns Group objects"""
+        self.__init()
+        q = " orgid: %s" % self._portalId
+
+        nextStart = 0
+        while nextStart > -1:
+            results = self.search(q=q, start=nextStart, num=100)
+            grps = results['results']
+            for grp in grps:
+                yield self.group(grp['id'])
+            nextStart = results['nextStart']
     #----------------------------------------------------------------------
     def search(self, q, start=1, num=10, sortField="title",
                sortOrder="asc"):
@@ -1524,6 +1522,7 @@ class User(BaseAGOLClass):
         url = "%s/invalidateSessions" % self.root
         params = {"f": "json"}
         return self._do_post(url=url,
+                             param_dict=params,
                              securityHandler=self._securityHandler,
                              proxy_url=self._proxy_url,
                              proxy_port=self._proxy_port)
@@ -1535,6 +1534,7 @@ class User(BaseAGOLClass):
         params = {
             "f" : "json"
         }
+        expiration = -1
         if isinstance(hours, str):
             if expiration == "now":
                 expiration = -1
@@ -1550,6 +1550,7 @@ class User(BaseAGOLClass):
         params['expiration'] = expiration
         url = "%s/expirePassword" % self.root
         return self._do_post(url=url,
+                             param_dict=params,
                              securityHandler=self._securityHandler,
                              proxy_url=self._proxy_url,
                              proxy_port=self._proxy_port)
